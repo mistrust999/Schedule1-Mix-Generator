@@ -124,15 +124,15 @@ def main():
         description="Find or evaluate mixes for Schedule I"
     )
     parser.add_argument(
-        "--drug", required=True, type=validate_drug,
+        "--drug", '-d', required=True, type=validate_drug,
         help="Base drug (case-insensitive)"
     )
     parser.add_argument(
-        "--effects", nargs="+", type=validate_effect,
+        "--effects", '-e', nargs="+", type=validate_effect,
         help="Desired effects to search for (case-insensitive)"
     )
     parser.add_argument(
-        "--ingredients", nargs="+", type=validate_ingredient,
+        "--ingredients", '-i', nargs="+", type=validate_ingredient,
         help="Custom ingredients to evaluate (case-insensitive)"
     )
     parser.add_argument(
