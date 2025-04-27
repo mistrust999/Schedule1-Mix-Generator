@@ -1,5 +1,6 @@
 import argparse
 from collections import deque
+from datetime import datetime
 import textwrap
 
 BASE_DRUGS = {
@@ -30,18 +31,27 @@ INGREDIENTS = {
     "Viagra":       {"cost": 4,  "add": "Tropic Thunder",   "replace": {}},
 }
 
-EFFECT_VALUES = {
-    "Gingeritis":12,   "Energizing":10,     "Calorie-Dense":8,   "Bright-Eyed":10,
-    "Anti-Gravity":25, "Munchies":5,        "Slippery":7,        "Balding":9,
-    "Schizophrenic":22,"Foggy":11,          "Long-Faced":15,     "Jennerising":13,
-    "Spicy":8,         "Laxative":9,        "Euphoric":14,       "Thought-Provoking":14,
-    "Tropic Thunder":12,"Sneaky":11,        "Toxic":10
+EFFECT_MULTIPLIERS = {
+    "Shrinking":       0.60, "Zombifying":     0.58, "Cyclopean":      0.56,
+    "Anti-Gravity":    0.54, "Glowing":        0.50, "Electrifying":   0.50,
+    "Long-Faced":      0.45, "Tropic Thunder": 0.42, "Bright-Eyed":    0.40,
+    "Thought-Provoking":0.38,"Calorie-Dense":  0.28, "Energizing":     0.22,
+    "Gingeritis":      0.12, "Spicy":          0.08,
 }
+
+ALL_EFFECTS = (
+    list(EFFECT_MULTIPLIERS.keys())
+    + [
+        "Munchies","Sneaky","Toxic","Balding","Schizophrenic",
+        "Foggy","Jennerising","Laxative","Euphoric","Slippery",
+        "Sedating"            
+    ]
+)
 
 MAX_EFFECTS = 8  
 
 DRUG_MAP       = {name.lower(): name for name in BASE_DRUGS}
-EFFECT_MAP     = {name.lower(): name for name in EFFECT_VALUES}
+EFFECT_MAP = {eff.lower(): eff for eff in ALL_EFFECTS}
 INGREDIENT_MAP = {name.lower(): name for name in INGREDIENTS}
 
 def validate_drug(x):
@@ -53,7 +63,7 @@ def validate_drug(x):
 def validate_effect(x):
     key = x.lower()
     if key not in EFFECT_MAP:
-        raise argparse.ArgumentTypeError(f"Invalid effect '{x}'. Valid: {', '.join(EFFECT_VALUES)}")
+        raise argparse.ArgumentTypeError(f"Invalid effect '{x}'. Valid: {', '.join(EFFECT_MULTIPLIERS)}")
     return EFFECT_MAP[key]
 
 def validate_ingredient(x):
@@ -88,7 +98,7 @@ def find_recipe(base_eff, target_eff, debug=False):
                 continue
             new_path = path + [ing]
             if debug:
-                print(f"[DEBUG] Mix {' â†’ '.join(new_path)} â†’ Effects={new_eff}")
+                print(f"[DEBUG] Mix {' -> '.join(new_path)} -> Effects={new_eff}")
             if target_eff.issubset(new_eff):
                 return new_path
             if new_eff not in seen:
@@ -98,18 +108,20 @@ def find_recipe(base_eff, target_eff, debug=False):
 
 def calculate_price_and_profit(drug, recipe):
     base = BASE_DRUGS[drug]
-    cost   = base["craft_cost"] + sum(INGREDIENTS[i]["cost"] for i in recipe)
-    effs   = set(base["base_effects"])
+    cost = base["craft_cost"] + sum(INGREDIENTS[i]["cost"] for i in recipe)
+    effs = set(base["base_effects"])
     for i in recipe:
         effs = set(apply_ingredient(effs, i))
-    unit   = base["base_price"] + sum(EFFECT_VALUES[e] for e in effs)
-    rev    = unit * base["yield_units"]
-    prof   = rev - cost
-    return cost, rev, prof, effs, unit
+
+    multiplier = sum(EFFECT_MULTIPLIERS.get(e, 0) for e in effs)
+    unit_price = base["base_price"] * (1 + multiplier)
+    revenue   = unit_price * base["yield_units"]
+    profit    = revenue - cost
+    return cost, revenue, profit, effs, unit_price
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Find or evaluate a mix in Schedule I"
+        description="Find or evaluate mixes for Schedule I"
     )
     parser.add_argument(
         "--drug", required=True, type=validate_drug,
@@ -121,41 +133,48 @@ def main():
     )
     parser.add_argument(
         "--ingredients", nargs="+", type=validate_ingredient,
-        help="Custom ingredient list to evaluate (case-insensitive)"
+        help="Custom ingredients to evaluate (case-insensitive)"
     )
     parser.add_argument(
         "--debug", action="store_true",
-        help="Print each mix step and resulting effects"
+        help="Show BFS debug trace"
     )
     args = parser.parse_args()
 
     if not args.effects and not args.ingredients:
         parser.error("Must specify at least one of --effects or --ingredients.")
 
+    output = []
+
     if args.effects:
         if len(args.effects) > MAX_EFFECTS:
             parser.error(f"Cannot target more than {MAX_EFFECTS} effects.")
         recipe = find_recipe(BASE_DRUGS[args.drug]["base_effects"], set(args.effects), debug=args.debug)
         if recipe:
-            print("Recipe for effects:", " -> ".join(args.effects))
-            print("Mix steps:   ", " -> ".join(recipe))
             cost, rev, prof, final, unit = calculate_price_and_profit(args.drug, recipe)
-            print(f"Profit: ${prof:.2f} (Unit price ${unit:.2f}, cost ${cost:.2f})\n")
+            output.append(f"Recipe found for effects: {', '.join(args.effects)}")
+            output.append(f"Mix steps: {' -> '.join(recipe)}")
+            output.append(f"Profit: ${prof:.2f}  (Unit price ${unit:.2f}, cost ${cost:.2f})\n")
         else:
-            print("No recipe found for effects (cap 8). Try --debug.\n")
+            output.append("No recipe found for those effects (cap 8). Try --debug.\n")
 
     if args.ingredients:
-        recipe = args.ingredients
-        print("Evaluating custom ingredients:")
-        print("Mix steps:   ", " -> ".join(recipe))
-        cost, rev, prof, final, unit = calculate_price_and_profit(args.drug, recipe)
-        print(textwrap.dedent(f"""\
-            Final Effects:     {', '.join(final)}
-            Crafting Cost:     ${cost:.2f}
-            Estimated Unit $:  ${unit:.2f}
-            Total Revenue:     ${rev:.2f}
-            Estimated Profit:  ${prof:.2f}
-        """))
+        cost, rev, prof, final, unit = calculate_price_and_profit(args.drug, args.ingredients)
+        output.append("Evaluating custom ingredients:")
+        output.append(f"Mix steps: {' -> '.join(args.ingredients)}")
+        output.append(f"Final Effects: {', '.join(final)}")
+        output.append(f"Profit: ${prof:.2f} \n(Unit price ${unit:.2f}, cost ${cost:.2f})\n")
+
+    full_output = "\n".join(output).strip()
+    print(full_output)
+
+    save = input("Save results to file? (y/n): ").strip().lower()
+    if save in ("y", "yes"):
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"{args.drug.replace(' ', '_')}_{ts}.txt"
+        with open(fname, "w") as f:
+            f.write(full_output)
+        print(f"Results saved to {fname}")
 
 if __name__ == "__main__":
     main()
